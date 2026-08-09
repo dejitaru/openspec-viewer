@@ -7,3 +7,61 @@ body,
   height: 100%;
   margin: 0;
 }
+
+/* Default palette (One Dark Pro). Overridden at runtime via inline custom
+   properties on :root, driven by the theme files in the app's storage/themes
+   folder — see src/stores/projects.ts applyTheme(). These values are the
+   fallback used before the store applies a theme and for any color key a
+   custom theme file omits. */
+:root {
+  --color-slate-950: #1e2227;
+  --color-slate-900: #21252b;
+  --color-slate-800: #2c313a;
+  --color-slate-700: #3e4451;
+  --color-slate-600: #4b5263;
+  --color-slate-500: #5c6370;
+  --color-slate-400: #7f848e;
+  --color-slate-300: #abb2bf;
+  --color-slate-200: #c0c5ce;
+  --color-slate-100: #d7dae0;
+
+  --color-emerald-300: #98c379;
+  --color-emerald-400: #98c379;
+  --color-emerald-500: #7fb069;
+  --color-emerald-600: #5c8a46;
+  --color-emerald-700: #456d33;
+
+  --color-amber-100: #e5c07b;
+  --color-amber-200: #e5c07b;
+  --color-amber-300: #e5c07b;
+  --color-amber-400: #e5c07b;
+  --color-amber-500: #c7a05e;
+  --color-amber-800: #8a6d2f;
+  --color-amber-900: #6b531f;
+  --color-amber-950: #4a3a12;
+
+  --color-red-300: #e06c75;
+  --color-red-800: #b04a52;
+  --color-red-950: #7a2d33;
+
+  --color-cyan-300: #56b6c2;
+  --color-cyan-400: #3d9daa;
+
+  --tw-prose-invert-body: var(--color-slate-300);
+  --tw-prose-invert-headings: var(--color-slate-100);
+  --tw-prose-invert-lead: var(--color-slate-400);
+  --tw-prose-invert-links: var(--color-emerald-300);
+  --tw-prose-invert-bold: var(--color-slate-100);
+  --tw-prose-invert-counters: var(--color-slate-500);
+  --tw-prose-invert-bullets: var(--color-slate-600);
+  --tw-prose-invert-hr: var(--color-slate-700);
+  --tw-prose-invert-quotes: var(--color-slate-300);
+  --tw-prose-invert-quote-borders: var(--color-slate-700);
+  --tw-prose-invert-captions: var(--color-slate-500);
+  --tw-prose-invert-kbd: var(--color-slate-100);
+  --tw-prose-invert-code: var(--color-cyan-300);
+  --tw-prose-invert-pre-code: var(--color-slate-200);
+  --tw-prose-invert-pre-bg: var(--color-slate-900);
+  --tw-prose-invert-th-borders: var(--color-slate-600);
+  --tw-prose-invert-td-borders: var(--color-slate-700);
+}
