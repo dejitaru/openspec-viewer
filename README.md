@@ -6,6 +6,11 @@ questions — through a clean, themeable UI instead of raw markdown files.
 
 Built with [Tauri v2](https://v2.tauri.app/) (Rust) + [Vue 3](https://vuejs.org/) + TypeScript.
 
+<p align="center">
+  <img src="./docs/screenshot-home.jpg" alt="Project picker screen" width="49%" />
+  <img src="./docs/screenshot-spec.jpg" alt="Browsing a spec's requirements" width="49%" />
+</p>
+
 ## Requirements
 
 To build and run this project from source you need:
@@ -71,6 +76,10 @@ Open **⚙️ Settings** (bottom of the left sidebar) for two things:
   `themes` subfolder next to `projects.json` (same **Open config folder** button, then look inside
   `themes/`). To add a custom theme, duplicate one of the existing `.json` files there and edit its
   colors — it shows up in the Settings menu the next time you open it.
+
+<p align="center">
+  <img src="./docs/screenshot-settings.jpg" alt="Settings panel with theme picker" width="60%" />
+</p>
 
 ## Project structure
 
