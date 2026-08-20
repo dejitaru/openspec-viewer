@@ -162,13 +162,19 @@ function defaultSpecSection(parsed: ParsedSpec | null): SpecSection {
   return "openQuestions";
 }
 
+const showOpenQuestionsOnly = ref(false);
+
 function onOpenQuestionsClick() {
   if (activeSection.value === "specs" && viewMode.value === "outline") {
     showSpecSection("openQuestions");
   } else {
-    goToSection("open-questions");
+    showOpenQuestionsOnly.value = true;
   }
 }
+
+watch([activeFilePath, activeChangeFolder], () => {
+  showOpenQuestionsOnly.value = false;
+});
 
 const specBrowserCapabilities = computed<SpecBrowserFile[]>(() => {
   if (changeSpecsMode.value) return changeSpecsFiles.value;
@@ -246,10 +252,6 @@ async function selectChangeFolder(folder: string) {
   } else if (group.specFiles.length) {
     await openChangeSpecs(folder);
   }
-}
-
-function goToSection(id: string) {
-  document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 function setError(err: unknown) {
@@ -711,7 +713,8 @@ onUnmounted(() => {
                 @click="onOpenQuestionsClick"
                 :class="[
                   'text-[11px] px-2.5 py-1 rounded font-mono transition',
-                  activeSection === 'specs' && viewMode === 'outline' && specViewSection === 'openQuestions'
+                  (activeSection === 'specs' && viewMode === 'outline' && specViewSection === 'openQuestions') ||
+                  showOpenQuestionsOnly
                     ? 'bg-slate-800 text-emerald-400 font-bold'
                     : 'bg-slate-800/60 hover:bg-slate-700 text-amber-300',
                 ]"
@@ -831,8 +834,15 @@ onUnmounted(() => {
           </div>
         </div>
 
+        <div
+          v-else-if="changeSpecsMode && showOpenQuestionsOnly"
+          class="flex-1 min-h-0 overflow-y-auto px-6 py-6 max-w-4xl"
+        >
+          <OpenQuestions :questionsText="displayOpenQuestions" @saveQuestions="saveQuestions" />
+        </div>
+
         <div v-else-if="changeSpecsMode" class="flex-1 min-h-0 overflow-y-auto px-6 py-6 max-w-4xl space-y-6">
-          <section v-if="specBrowserOverview?.purpose" id="o-purpose" class="scroll-mt-24">
+          <section v-if="specBrowserOverview?.purpose">
             <h3 class="text-xs font-mono uppercase tracking-wider text-emerald-400 mb-2">🎯 Purpose</h3>
             <div
               class="text-sm text-slate-200 leading-relaxed prose prose-invert max-w-none"
@@ -863,7 +873,7 @@ onUnmounted(() => {
             <p v-else class="text-xs text-slate-500">Select a requirement to see its details.</p>
           </div>
 
-          <section v-if="specBrowserOverview?.topScenarios.length" id="o-scen" class="scroll-mt-24">
+          <section v-if="specBrowserOverview?.topScenarios.length">
             <h3 class="text-xs font-mono uppercase tracking-wider text-cyan-400 mb-2">🎬 Scenarios</h3>
             <div class="space-y-2">
               <div
@@ -877,7 +887,7 @@ onUnmounted(() => {
             </div>
           </section>
 
-          <section v-if="specBrowserOverview?.limitations" id="o-lim" class="scroll-mt-24">
+          <section v-if="specBrowserOverview?.limitations">
             <h3 class="text-xs font-mono uppercase tracking-wider text-amber-400 mb-2">⚠️ Known Limitations</h3>
             <div
               class="text-sm text-slate-200 prose prose-invert max-w-none"
@@ -885,17 +895,20 @@ onUnmounted(() => {
             />
           </section>
 
-          <section v-if="specBrowserOverview?.nonGoals" class="scroll-mt-24">
+          <section v-if="specBrowserOverview?.nonGoals">
             <h3 class="text-xs font-mono uppercase tracking-wider text-slate-400 mb-2">🚫 Non-Goals</h3>
             <div
               class="text-sm text-slate-300 prose prose-invert max-w-none"
               v-html="renderMd(specBrowserOverview.nonGoals)"
             />
           </section>
+        </div>
 
-          <div id="open-questions" class="scroll-mt-28">
-            <OpenQuestions :questionsText="displayOpenQuestions" @saveQuestions="saveQuestions" />
-          </div>
+        <div
+          v-else-if="activeFileContent && showOpenQuestionsOnly"
+          class="flex-1 min-h-0 overflow-y-auto px-6 py-6 max-w-4xl"
+        >
+          <OpenQuestions :questionsText="openQuestionsText" @saveQuestions="saveQuestions" />
         </div>
 
         <div v-else-if="activeFileContent" class="flex-1 min-h-0 overflow-y-auto px-6 py-6 max-w-4xl">
@@ -904,14 +917,10 @@ onUnmounted(() => {
           <div class="mt-8">
             <SpecDetail :content="activeFileContent" />
           </div>
-
-          <div id="open-questions" class="mt-6 scroll-mt-28">
-            <OpenQuestions :questionsText="openQuestionsText" @saveQuestions="saveQuestions" />
-          </div>
         </div>
 
         <ChangeRequirementsSidebar
-          v-if="requirementsMode"
+          v-if="requirementsMode && !showOpenQuestionsOnly"
           :capabilities="specBrowserCapabilities"
           :selected="selectedRequirement"
           @select="selectRequirement"
