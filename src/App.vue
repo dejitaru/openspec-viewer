@@ -431,12 +431,20 @@ function onKeyDown(e: KeyboardEvent) {
   }
 }
 
+let fsChangeTimer: ReturnType<typeof setTimeout> | undefined;
+
+function scheduleReload() {
+  clearTimeout(fsChangeTimer);
+  fsChangeTimer = setTimeout(loadFolder, 300);
+}
+
 onMounted(async () => {
-  unlisten.value = await listen("fs-change", () => loadFolder());
+  unlisten.value = await listen("fs-change", scheduleReload);
   window.addEventListener("keydown", onKeyDown);
 });
 
 onUnmounted(() => {
+  clearTimeout(fsChangeTimer);
   if (unlisten.value) unlisten.value();
   window.removeEventListener("keydown", onKeyDown);
 });

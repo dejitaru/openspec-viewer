@@ -49,7 +49,7 @@ struct ThemeFile {
 }
 
 #[allow(dead_code)]
-struct WatchHandle(Mutex<RecommendedWatcher>);
+struct WatchHandle(Mutex<Option<RecommendedWatcher>>);
 
 fn scan_section(section: &str, root: &Path) -> Vec<OpenSpecEntry> {
     let dir = root.join("openspec").join(section);
@@ -334,6 +334,15 @@ fn save_config(app: AppHandle, theme: String, projects: Vec<Project>) -> Result<
 }
 
 fn start_watcher(app: &AppHandle, root: String) -> Result<(), String> {
+    // Only the `openspec/` subtree is relevant to this app. Watching the whole
+    // project root would also pick up build output (target/, node_modules/,
+    // dist/, .git/), which churns constantly in dev mode and can flood the
+    // watcher with events, driving repeated full rescans and runaway memory.
+    let watch_root = Path::new(&root).join("openspec");
+    if !watch_root.exists() {
+        return Ok(());
+    }
+
     let handle = app.clone();
     let mut watcher = notify::recommended_watcher(
         move |res: Result<notify::Event, notify::Error>| {
@@ -352,10 +361,15 @@ fn start_watcher(app: &AppHandle, root: String) -> Result<(), String> {
     .map_err(|e| e.to_string())?;
 
     watcher
-        .watch(Path::new(&root), RecursiveMode::Recursive)
+        .watch(&watch_root, RecursiveMode::Recursive)
         .map_err(|e| e.to_string())?;
 
-    app.manage(WatchHandle(Mutex::new(watcher)));
+    // Replace any existing watcher rather than `app.manage`-ing a new one:
+    // `manage()` is a no-op if state of that type is already registered, so a
+    // second call would silently drop the new watcher and leave the old
+    // project's watcher (and its stale root) running forever.
+    let state = app.state::<WatchHandle>();
+    *state.0.lock().map_err(|e| e.to_string())? = Some(watcher);
     Ok(())
 }
 
@@ -369,6 +383,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .manage(WatchHandle(Mutex::new(None)))
         .invoke_handler(tauri::generate_handler![
             read_openspec_dir,
             read_file_content,
