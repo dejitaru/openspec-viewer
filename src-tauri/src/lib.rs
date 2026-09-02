@@ -51,13 +51,29 @@ struct ThemeFile {
 #[allow(dead_code)]
 struct WatchHandle(Mutex<Option<RecommendedWatcher>>);
 
+fn is_hidden_dir(entry: &walkdir::DirEntry) -> bool {
+    entry.file_type().is_dir()
+        && entry
+            .file_name()
+            .to_str()
+            .map(|s| s.starts_with('.'))
+            .unwrap_or(false)
+}
+
 fn scan_section(section: &str, root: &Path) -> Vec<OpenSpecEntry> {
     let dir = root.join("openspec").join(section);
     let mut entries = Vec::new();
     if !dir.exists() {
         return entries;
     }
-    for entry in WalkDir::new(&dir).follow_links(true).min_depth(1) {
+    // Dot-directories (e.g. changes/.trash/) hold soft-deleted changes and must
+    // stay out of the app entirely, not just be hidden in the UI.
+    let walker = WalkDir::new(&dir)
+        .follow_links(true)
+        .min_depth(1)
+        .into_iter()
+        .filter_entry(|e| !is_hidden_dir(e));
+    for entry in walker {
         let Ok(entry) = entry else { continue };
         let is_md = entry.file_type().is_file()
             && entry.path().extension().and_then(|s| s.to_str()) == Some("md");
@@ -96,6 +112,70 @@ fn read_file_content(path: String) -> Result<String, String> {
 #[tauri::command]
 fn save_file_content(path: String, content: String) -> Result<(), String> {
     fs::write(path, content).map_err(|e| e.to_string())
+}
+
+fn changes_dir(root: &str) -> std::path::PathBuf {
+    Path::new(root).join("openspec").join("changes")
+}
+
+/// Resolves `folder` (a change's path relative to `openspec/changes/`, e.g.
+/// "add-x" or "archive/add-x") to an absolute path, rejecting anything that
+/// would escape the changes directory.
+fn resolve_change_dir(root: &str, folder: &str) -> Result<std::path::PathBuf, String> {
+    if folder.trim().is_empty() {
+        return Err("Empty change folder".to_string());
+    }
+    if folder
+        .split('/')
+        .any(|seg| seg.is_empty() || seg == "." || seg == "..")
+    {
+        return Err("Invalid change folder".to_string());
+    }
+    let changes_root = changes_dir(root);
+    let target = changes_root.join(folder);
+    let canonical_changes = changes_root.canonicalize().map_err(|e| e.to_string())?;
+    let canonical_target = target.canonicalize().map_err(|e| e.to_string())?;
+    if !canonical_target.starts_with(&canonical_changes) || canonical_target == canonical_changes
+    {
+        return Err("Change folder escapes the changes directory".to_string());
+    }
+    if !canonical_target.is_dir() {
+        return Err("Change folder not found".to_string());
+    }
+    Ok(canonical_target)
+}
+
+/// Soft-deletes a change by moving it under `openspec/changes/.trash/`. The
+/// app's scanner skips dot-directories, so the change disappears from the UI
+/// without touching `changes/archive/` (which is reserved for changes that
+/// were actually implemented and merged) or destroying any files.
+#[tauri::command]
+fn trash_change(root: String, folder: String) -> Result<String, String> {
+    let source = resolve_change_dir(&root, &folder)?;
+    let trash_dir = changes_dir(&root).join(".trash");
+    fs::create_dir_all(&trash_dir).map_err(|e| e.to_string())?;
+
+    let base_name = source
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| "change".to_string());
+    let mut dest = trash_dir.join(&base_name);
+    if dest.exists() {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        dest = trash_dir.join(format!("{base_name}-{stamp}"));
+    }
+    fs::rename(&source, &dest).map_err(|e| e.to_string())?;
+    Ok(dest.to_string_lossy().to_string())
+}
+
+/// Permanently deletes a change folder from disk. Irreversible.
+#[tauri::command]
+fn delete_change(root: String, folder: String) -> Result<(), String> {
+    let target = resolve_change_dir(&root, &folder)?;
+    fs::remove_dir_all(&target).map_err(|e| e.to_string())
 }
 
 fn storage_dir(app: &AppHandle) -> Result<std::path::PathBuf, String> {
@@ -388,6 +468,8 @@ pub fn run() {
             read_openspec_dir,
             read_file_content,
             save_file_content,
+            trash_change,
+            delete_change,
             set_root,
             load_config,
             save_config,
@@ -435,6 +517,50 @@ mod tests {
             .any(|e| e.section == "changes" && e.relative == "feature-x/spec.md");
         assert!(has_spec, "spec no encontrada: {entries:?}");
         assert!(has_change, "change no encontrada: {entries:?}");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn trash_change_moves_folder_and_hides_it_from_scan() {
+        let root = sample_root("trash");
+        let dest = trash_change(root.to_string_lossy().to_string(), "feature-x".to_string())
+            .expect("trash_change should succeed");
+        assert!(Path::new(&dest).is_dir());
+        assert!(!root.join("openspec/changes/feature-x").exists());
+
+        let entries = read_openspec_dir(root.to_string_lossy().to_string());
+        assert!(
+            !entries.iter().any(|e| e.relative.contains("feature-x")),
+            "trashed change leaked into scan: {entries:?}"
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn trash_change_avoids_collision_with_existing_trash_entry() {
+        let root = sample_root("trash-collision");
+        fs::create_dir_all(root.join("openspec/changes/.trash/feature-x")).unwrap();
+        let dest = trash_change(root.to_string_lossy().to_string(), "feature-x".to_string())
+            .expect("trash_change should succeed");
+        assert_ne!(dest, root.join("openspec/changes/.trash/feature-x").to_string_lossy());
+        assert!(Path::new(&dest).is_dir());
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn delete_change_removes_folder_permanently() {
+        let root = sample_root("delete");
+        delete_change(root.to_string_lossy().to_string(), "feature-x".to_string())
+            .expect("delete_change should succeed");
+        assert!(!root.join("openspec/changes/feature-x").exists());
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn resolve_change_dir_rejects_path_traversal() {
+        let root = sample_root("traversal");
+        let err = resolve_change_dir(&root.to_string_lossy(), "../specs").unwrap_err();
+        assert!(err.contains("Invalid"), "unexpected error: {err}");
         let _ = fs::remove_dir_all(&root);
     }
 

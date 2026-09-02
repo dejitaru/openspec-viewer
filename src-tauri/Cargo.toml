@@ -25,3 +25,14 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 walkdir = "2"
 notify = "7"
+
+# `tauri dev` rebuilds this crate plus its large wry/tao/objc2 dependency tree
+# on every change. Full debug info (the cargo default) makes that dependency
+# tree's compiled output ~2.3GB (see target/debug/deps) and is a big chunk of
+# the peak RAM rustc/LLVM use while generating it. Line tables keep panic
+# backtraces with file/line info; `split-debuginfo = "unpacked"` skips
+# macOS's `dsymutil` post-link step, which is otherwise a separate memory-
+# and time-heavy pass over that same debug info on every rebuild.
+[profile.dev]
+debug = "line-tables-only"
+split-debuginfo = "unpacked"

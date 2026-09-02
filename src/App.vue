@@ -13,6 +13,7 @@ import { useProjectsStore } from "./stores/projects";
 import { parseSpec, type ParsedSpec } from "./lib/specParser";
 import ChangeRequirementsSidebar from "./components/ChangeRequirementsSidebar.vue";
 import SettingsModal from "./components/SettingsModal.vue";
+import DeleteChangeModal from "./components/DeleteChangeModal.vue";
 
 const md = new MarkdownIt({ html: false, linkify: true, breaks: true });
 function renderMd(text: string): string {
@@ -33,12 +34,17 @@ const errorMsg = ref("");
 const loading = ref(false);
 const collapsedSpecs = ref(false);
 const collapsedChanges = ref(false);
+const collapsedArchive = ref(true);
 const activeChangeFolder = ref("");
 const fileFilter = ref("");
 const fileFilterInput = ref<HTMLInputElement | null>(null);
 const settingsOpen = ref(false);
+const deleteChangeTarget = ref<{ folder: string; label: string } | null>(null);
 const activeTitle = computed(() => {
-  if (changeSpecsMode.value) return activeChangeFolder.value;
+  if (activeSection.value === "changes" && activeChangeGroup.value) {
+    const folder = activeChangeGroup.value.folder;
+    return folder.startsWith("archive/") ? archivedChangeLabel(folder) : folder;
+  }
   const parts = activeFilePath.value.split("/");
   const file = parts[parts.length - 1] || "";
   if (file === "spec.md" && parts.length >= 2) {
@@ -68,7 +74,14 @@ function filterEntries(entries: Array<{ path: string; relative: string; section:
 
 function changeFolderOf(relative: string) {
   const idx = relative.indexOf("/");
-  return idx === -1 ? relative : relative.slice(0, idx);
+  if (idx === -1) return relative;
+  const first = relative.slice(0, idx);
+  if (first === "archive") {
+    const rest = relative.slice(idx + 1);
+    const idx2 = rest.indexOf("/");
+    return idx2 === -1 ? relative : `archive/${rest.slice(0, idx2)}`;
+  }
+  return first;
 }
 
 type ChangeFileKind = "design" | "proposal" | "tasks" | "specs" | "other";
@@ -105,8 +118,8 @@ const allGroupedChanges = computed(() => {
         continue;
       }
       const rel = e.relative === folder ? e.relative : e.relative.slice(folder.length + 1);
-      if (rel === "design.md") tabs.push({ kind: "design", order: 0, label: "Design", icon: "📐", path: e.path, relative: e.relative });
-      else if (rel === "proposal.md") tabs.push({ kind: "proposal", order: 1, label: "Proposal", icon: "📋", path: e.path, relative: e.relative });
+      if (rel === "proposal.md") tabs.push({ kind: "proposal", order: 0, label: "Proposal", icon: "📋", path: e.path, relative: e.relative });
+      else if (rel === "design.md") tabs.push({ kind: "design", order: 1, label: "Design", icon: "📐", path: e.path, relative: e.relative });
       else if (rel === "tasks.md") tabs.push({ kind: "tasks", order: 2, label: "Tasks", icon: "✅", path: e.path, relative: e.relative });
       else tabs.push({ kind: "other", order: 4, label: rel.replace(/\.md$/, ""), icon: "📝", path: e.path, relative: e.relative });
     }
@@ -120,8 +133,17 @@ const allGroupedChanges = computed(() => {
 
 const groupedChangeFolders = computed(() => {
   const matching = new Set(filteredChanges.value.map((e) => changeFolderOf(e.relative)));
-  return allGroupedChanges.value.filter((g) => matching.has(g.folder));
+  return allGroupedChanges.value.filter((g) => matching.has(g.folder) && !g.folder.startsWith("archive/"));
 });
+
+const archivedChangeFolders = computed(() => {
+  const matching = new Set(filteredChanges.value.map((e) => changeFolderOf(e.relative)));
+  return allGroupedChanges.value.filter((g) => matching.has(g.folder) && g.folder.startsWith("archive/"));
+});
+
+function archivedChangeLabel(folder: string) {
+  return folder.slice("archive/".length);
+}
 
 const activeChangeGroup = computed(
   () => allGroupedChanges.value.find((g) => g.folder === activeChangeFolder.value) || null
@@ -254,6 +276,24 @@ async function selectChangeFolder(folder: string) {
   }
 }
 
+function openDeleteChangeModal(folder: string) {
+  const label = folder.startsWith("archive/") ? archivedChangeLabel(folder) : folder;
+  deleteChangeTarget.value = { folder, label };
+}
+
+async function onChangeDeleted() {
+  const deletedFolder = deleteChangeTarget.value?.folder;
+  deleteChangeTarget.value = null;
+  if (deletedFolder && activeChangeFolder.value === deletedFolder) {
+    activeChangeFolder.value = "";
+    activeFilePath.value = "";
+    activeFileContent.value = "";
+    changeSpecsMode.value = false;
+    changeSpecsFiles.value = [];
+  }
+  await loadFolder();
+}
+
 function setError(err: unknown) {
   errorMsg.value = typeof err === "string" ? err : err instanceof Error ? err.message : String(err);
   console.error(errorMsg.value, err);
@@ -272,6 +312,7 @@ async function pickRoot() {
   rootPath.value = picked;
   await projectsStore.upsert(picked);
   await setRoot(picked);
+  resetSidebarCollapse();
   await loadFolder();
 }
 
@@ -280,7 +321,14 @@ async function openProject(path: string) {
   rootPath.value = path;
   await projectsStore.upsert(path);
   await setRoot(path);
+  resetSidebarCollapse();
   await loadFolder();
+}
+
+function resetSidebarCollapse() {
+  collapsedSpecs.value = true;
+  collapsedChanges.value = false;
+  collapsedArchive.value = true;
 }
 
 function goHome() {
@@ -494,43 +542,6 @@ onUnmounted(() => {
       />
 
       <div class="space-y-4 overflow-y-auto flex-1">
-        <div v-if="filteredSpecs.length">
-          <button
-            @click="collapsedSpecs = !collapsedSpecs"
-            class="w-full flex items-center justify-between mb-1 cursor-pointer group"
-          >
-            <h3 class="text-[10px] font-mono uppercase tracking-wider text-slate-500 group-hover:text-slate-300">
-              📄 Specs
-            </h3>
-            <svg
-              class="w-3 h-3 text-slate-500 transition-transform"
-              :class="collapsedSpecs ? '' : 'rotate-180'"
-              xmlns="http://www.w3.org/2000/svg"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              stroke-width="2"
-            >
-              <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
-            </svg>
-          </button>
-          <div v-if="!collapsedSpecs" class="space-y-1">
-            <button
-              v-for="entry in filteredSpecs"
-              :key="entry.path"
-              @click="selectFile(entry)"
-              :class="[
-                'w-full text-left text-xs p-2 rounded truncate font-mono transition',
-                activeFilePath === entry.path
-                  ? 'bg-slate-800 text-emerald-400 font-bold'
-                  : 'text-slate-400 hover:bg-slate-800/50 hover:text-slate-200',
-              ]"
-            >
-              {{ entry.relative }}
-            </button>
-          </div>
-        </div>
-
         <div v-if="filteredChanges.length">
           <button
             @click="collapsedChanges = !collapsedChanges"
@@ -565,6 +576,79 @@ onUnmounted(() => {
             >
               <span class="shrink-0">📁</span>
               <span class="truncate">{{ group.folder }}</span>
+            </button>
+
+            <div v-if="archivedChangeFolders.length">
+              <button
+                @click="collapsedArchive = !collapsedArchive"
+                class="w-full flex items-center gap-1.5 text-left text-xs p-2 rounded truncate font-mono text-slate-400 hover:bg-slate-800/50 hover:text-slate-200 transition cursor-pointer"
+              >
+                <span class="flex-1 truncate">🗄️ archive</span>
+                <svg
+                  class="w-3 h-3 text-slate-500 shrink-0 transition-transform"
+                  :class="collapsedArchive ? '' : 'rotate-180'"
+                  xmlns="http://www.w3.org/2000/svg"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  stroke-width="2"
+                >
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
+                </svg>
+              </button>
+              <div v-if="!collapsedArchive" class="pl-4 space-y-1 mt-1">
+                <button
+                  v-for="group in archivedChangeFolders"
+                  :key="group.folder"
+                  @click="selectChangeFolder(group.folder)"
+                  :class="[
+                    'w-full flex items-center gap-1.5 text-left text-xs p-2 rounded truncate font-mono transition',
+                    activeChangeFolder === group.folder
+                      ? 'bg-slate-800 text-emerald-400 font-bold'
+                      : 'text-slate-400 hover:bg-slate-800/50 hover:text-slate-200',
+                  ]"
+                >
+                  <span class="shrink-0">🗄️</span>
+                  <span class="truncate">{{ archivedChangeLabel(group.folder) }}</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div v-if="filteredSpecs.length">
+          <button
+            @click="collapsedSpecs = !collapsedSpecs"
+            class="w-full flex items-center justify-between mb-1 cursor-pointer group"
+          >
+            <h3 class="text-[10px] font-mono uppercase tracking-wider text-slate-500 group-hover:text-slate-300">
+              📄 Specs
+            </h3>
+            <svg
+              class="w-3 h-3 text-slate-500 transition-transform"
+              :class="collapsedSpecs ? '' : 'rotate-180'"
+              xmlns="http://www.w3.org/2000/svg"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
+            </svg>
+          </button>
+          <div v-if="!collapsedSpecs" class="space-y-1">
+            <button
+              v-for="entry in filteredSpecs"
+              :key="entry.path"
+              @click="selectFile(entry)"
+              :class="[
+                'w-full text-left text-xs p-2 rounded truncate font-mono transition',
+                activeFilePath === entry.path
+                  ? 'bg-slate-800 text-emerald-400 font-bold'
+                  : 'text-slate-400 hover:bg-slate-800/50 hover:text-slate-200',
+              ]"
+            >
+              {{ entry.relative }}
             </button>
           </div>
         </div>
@@ -622,7 +706,15 @@ onUnmounted(() => {
         class="sticky top-0 z-20 -mx-0 px-6 py-3 bg-slate-950/95 backdrop-blur border-b border-slate-800"
       >
         <div class="max-w-4xl">
-          <div class="flex items-baseline gap-4">
+          <div class="flex items-baseline gap-2">
+            <button
+              v-if="activeSection === 'changes' && activeChangeGroup"
+              @click="openDeleteChangeModal(activeChangeGroup.folder)"
+              class="shrink-0 text-xs px-1.5 py-0.5 rounded font-mono transition text-slate-500 hover:bg-red-950/60 hover:text-red-300"
+              title="Delete this change"
+            >
+              ⚙️
+            </button>
             <h1 class="text-lg font-bold text-slate-100 truncate">{{ activeTitle }}</h1>
           </div>
           <span
@@ -928,6 +1020,19 @@ onUnmounted(() => {
       </div>
     </main>
 
-    <SettingsModal v-if="settingsOpen" @close="settingsOpen = false" />
+    <SettingsModal
+      v-if="settingsOpen"
+      :projectPath="rootPath"
+      @close="settingsOpen = false"
+      @unlinked="goHome"
+    />
+    <DeleteChangeModal
+      v-if="deleteChangeTarget"
+      :root="rootPath"
+      :folder="deleteChangeTarget.folder"
+      :label="deleteChangeTarget.label"
+      @close="deleteChangeTarget = null"
+      @deleted="onChangeDeleted"
+    />
   </div>
 </template>
