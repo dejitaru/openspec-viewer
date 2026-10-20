@@ -88,3 +88,13 @@ src/            Vue 3 frontend (components, Pinia store, markdown/spec parsing)
 src-tauri/      Rust backend — Tauri commands, file-system watching, config/theme storage
 sample-repo/    Example OpenSpec project you can open to try the app immediately
 ```
+
+## Demo
+
+<p align="center">
+  <a href="./docs/demo.mp4">
+    <img src="./docs/demo-poster.jpg" alt="OpenSpec Visualizer demo video — click to play" width="100%" />
+  </a>
+</p>
+
+<p align="center"><a href="./docs/demo.mp4">▶ Watch the 20-second demo</a></p>
